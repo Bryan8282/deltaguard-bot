@@ -8,5 +8,5 @@
   "dependencies": {
     "discord.js": "^14.14.1",
     "mongoose": "^8.0.0"
-  }
+  }"openai": "^6.25.0"
 }
