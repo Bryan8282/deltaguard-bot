@@ -1,13 +1,6 @@
-{
-  "name": "deltaguard-bot",
-  "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
-  "dependencies": {
-    "discord.js": "^14.14.1",
-    "mongoose": "^7.5.0",
-    "openai": "^4.10.0"
-  }
+"dependencies": {
+  "discord.js": "^14.14.1",
+  "mongoose": "^8.0.0",
+  "openai": "^4.10.0",
+  "dotenv": "^16.0.3"
 }
