@@ -1,7 +1,7 @@
+// index.js
 const { Client, GatewayIntentBits, Partials, Events, Collection } = require('discord.js');
 const mongoose = require('mongoose');
-const fs = require('fs');
-const path = require('path');
+const { Configuration, OpenAIApi } = require('openai'); // API Gemini/OpenAI
 
 // ------------------ CONFIG ------------------
 const client = new Client({
@@ -23,7 +23,12 @@ mongoose.connect(process.env.MONGO_URI, {
 }).then(() => console.log('MongoDB conectado!'))
   .catch(err => console.log(err));
 
+// ------------------ OPENAI / GEMINI ------------------
+const configuration = new Configuration({ apiKey: process.env.GEMINI_KEY });
+const openai = new OpenAIApi(configuration);
+
 // ------------------ COMANDOS ------------------
+
 // Ping
 client.commands.set('ping', { execute: (message) => message.channel.send('Pong 🏓') });
 
@@ -44,12 +49,26 @@ client.commands.set('perfil', {
   }
 });
 
-// IA Placeholder
+// IA com Gemini / OpenAI
 client.commands.set('ia', {
-  execute: (message, args) => {
-    const question = args.join(" ");
-    if (!question) return message.channel.send("Escreva algo para a IA responder!");
-    message.channel.send(`Resposta de IA simulada: ${question}`);
+  execute: async (message, args) => {
+    const prompt = args.join(" ");
+    if (!prompt) return message.channel.send("Escreva algo para eu responder!");
+
+    try {
+      const response = await openai.createChatCompletion({
+        model: "gpt-4.1-mini", // ou modelo Gemini compatível
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 300
+      });
+
+      const answer = response.data.choices[0].message.content;
+      message.channel.send(answer);
+
+    } catch (err) {
+      console.error(err);
+      message.channel.send("Erro ao acessar a IA, tente novamente mais tarde.");
+    }
   }
 });
 
@@ -63,14 +82,14 @@ client.on('messageCreate', (message) => {
   if (!spamMap.has(key)) spamMap.set(key, []);
   const times = spamMap.get(key);
   times.push(Date.now());
-  spamMap.set(key, times.filter(t => t > Date.now() - 5000)); // 5s
+  spamMap.set(key, times.filter(t => t > Date.now() - 5000));
 
   if (spamMap.get(key).length > 5) {
     message.channel.send(`<@${message.author.id}> Spam detectado!`);
     spamMap.set(key, []);
   }
 
-  // Anti-imagem proibida (porn/gore placeholder)
+  // Anti-imagem proibida
   if (message.attachments.size > 0) {
     message.attachments.forEach(att => {
       const allowed = ['.jpg', '.jpeg', '.png', '.gif'];
@@ -90,16 +109,16 @@ client.on('messageCreate', (message) => {
   client.commands.get(cmd).execute(message, args);
 });
 
-// ------------------ ANTI-RAID (BÁSICO) ------------------
+// ------------------ ANTI-RAID ------------------
 const joinMap = new Map();
 client.on('guildMemberAdd', (member) => {
   const key = member.guild.id;
   if (!joinMap.has(key)) joinMap.set(key, []);
   const arr = joinMap.get(key);
   arr.push(Date.now());
-  joinMap.set(key, arr.filter(t => t > Date.now() - 10000)); // últimos 10s
+  joinMap.set(key, arr.filter(t => t > Date.now() - 10000));
 
-  if (arr.length > 3) { // 3 joins rápidos = alerta
+  if (arr.length > 3) {
     const alertChannel = member.guild.channels.cache.find(ch => ch.name === "delta-alerts");
     if (alertChannel) alertChannel.send(`Alerta: possível raid detectada!`);
   }
