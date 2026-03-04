@@ -1,7 +1,7 @@
-// index.js
-const { Client, GatewayIntentBits, Partials, Events, Collection } = require('discord.js');
+// index.js - DeltaGuard Ultra (Slash Commands)
+const { Client, GatewayIntentBits, Partials, Collection, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const mongoose = require('mongoose');
-const { Configuration, OpenAIApi } = require('openai'); // API Gemini/OpenAI
+const { Configuration, OpenAIApi } = require('openai');
 
 // ------------------ CONFIG ------------------
 const client = new Client({
@@ -13,8 +13,6 @@ const client = new Client({
     ],
     partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
-const prefix = "!";
-client.commands = new Collection();
 
 // ------------------ MONGO ------------------
 mongoose.connect(process.env.MONGO_URI, {
@@ -28,105 +26,117 @@ const configuration = new Configuration({ apiKey: process.env.GEMINI_KEY });
 const openai = new OpenAIApi(configuration);
 
 // ------------------ COMANDOS ------------------
+const commands = [
+    new SlashCommandBuilder().setName('ping').setDescription('Responde com Pong 🏓'),
+    new SlashCommandBuilder().setName('perfil').setDescription('Mostra perfil do usuário')
+        .addUserOption(option => option.setName('usuario').setDescription('Escolha um usuário')),
+    new SlashCommandBuilder().setName('ia').setDescription('Pergunte algo para a IA')
+        .addStringOption(option => option.setName('input').setDescription('Pergunta para a IA').setRequired(true)),
+];
 
-// Ping
-client.commands.set('ping', { execute: (message) => message.channel.send('Pong 🏓') });
+// ------------------ REGISTRAR COMANDOS ------------------
+client.once('ready', async () => {
+    console.log(`Bot online como ${client.user.tag}`);
 
-// Perfil
-client.commands.set('perfil', {
-  execute: (message, args) => {
-    const user = message.mentions.users.first() || message.author;
-    const embed = {
-      title: `Perfil de ${user.username}`,
-      thumbnail: { url: user.displayAvatarURL({ dynamic: true }) },
-      fields: [
-        { name: "ID", value: user.id, inline: true },
-        { name: "Criado em", value: user.createdAt.toDateString(), inline: true },
-        { name: "Bot?", value: user.bot ? "Sim" : "Não", inline: true },
-      ],
-    };
-    message.channel.send({ embeds: [embed] });
-  }
-});
-
-// IA com Gemini / OpenAI
-client.commands.set('ia', {
-  execute: async (message, args) => {
-    const prompt = args.join(" ");
-    if (!prompt) return message.channel.send("Escreva algo para eu responder!");
-
+    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
     try {
-      const response = await openai.createChatCompletion({
-        model: "gpt-4.1-mini", // ou modelo Gemini compatível
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 300
-      });
-
-      const answer = response.data.choices[0].message.content;
-      message.channel.send(answer);
-
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: commands.map(cmd => cmd.toJSON()) },
+        );
+        console.log('Slash commands registrados com sucesso!');
     } catch (err) {
-      console.error(err);
-      message.channel.send("Erro ao acessar a IA, tente novamente mais tarde.");
+        console.error(err);
     }
-  }
 });
 
-// ------------------ ANTI-SPAM ------------------
+// ------------------ EVENTO DE INTERAÇÃO ------------------
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isCommand()) return;
+
+    const { commandName } = interaction;
+
+    // ---------- /ping ----------
+    if (commandName === 'ping') {
+        await interaction.reply('Pong 🏓');
+    }
+
+    // ---------- /perfil ----------
+    if (commandName === 'perfil') {
+        const user = interaction.options.getUser('usuario') || interaction.user;
+        const embed = {
+            title: `Perfil de ${user.username}`,
+            thumbnail: { url: user.displayAvatarURL({ dynamic: true }) },
+            fields: [
+                { name: "ID", value: user.id, inline: true },
+                { name: "Criado em", value: user.createdAt.toDateString(), inline: true },
+                { name: "Bot?", value: user.bot ? "Sim" : "Não", inline: true },
+            ],
+        };
+        await interaction.reply({ embeds: [embed] });
+    }
+
+    // ---------- /ia ----------
+    if (commandName === 'ia') {
+        const prompt = interaction.options.getString('input');
+        try {
+            const response = await openai.createChatCompletion({
+                model: "gpt-4.1-mini",
+                messages: [{ role: "user", content: prompt }],
+                max_tokens: 300
+            });
+            const answer = response.data.choices[0].message.content;
+            await interaction.reply(answer);
+        } catch (err) {
+            console.error(err);
+            await interaction.reply("Erro ao acessar a IA, tente novamente mais tarde.");
+        }
+    }
+});
+
+// ------------------ ANTI-SPAM E ALERTAS ------------------
 const spamMap = new Map();
-client.on('messageCreate', (message) => {
-  if (message.author.bot) return;
+client.on('messageCreate', async message => {
+    if (message.author.bot) return;
 
-  // Anti-spam
-  const key = `${message.guild.id}-${message.author.id}`;
-  if (!spamMap.has(key)) spamMap.set(key, []);
-  const times = spamMap.get(key);
-  times.push(Date.now());
-  spamMap.set(key, times.filter(t => t > Date.now() - 5000));
-
-  if (spamMap.get(key).length > 5) {
-    message.channel.send(`<@${message.author.id}> Spam detectado!`);
-    spamMap.set(key, []);
-  }
-
-  // Anti-imagem proibida
-  if (message.attachments.size > 0) {
-    message.attachments.forEach(att => {
-      const allowed = ['.jpg', '.jpeg', '.png', '.gif'];
-      if (!allowed.some(ext => att.name.endsWith(ext))) {
-        message.member.ban({ reason: "Imagem proibida" }).catch(() => {});
+    // Anti-spam
+    const key = `${message.guild.id}-${message.author.id}`;
+    if (!spamMap.has(key)) spamMap.set(key, []);
+    const times = spamMap.get(key);
+    times.push(Date.now());
+    spamMap.set(key, times.filter(t => t > Date.now() - 5000));
+    if (spamMap.get(key).length > 5) {
         const alertChannel = message.guild.channels.cache.find(ch => ch.name === "delta-alerts");
-        if (alertChannel) alertChannel.send(`<@${message.author.id}> banido por imagem proibida.`);
-      }
-    });
-  }
+        if (alertChannel) alertChannel.send(`<@${message.author.id}> Spam detectado!`);
+        spamMap.set(key, []);
+    }
 
-  // Comandos
-  if (!message.content.startsWith(prefix)) return;
-  const args = message.content.slice(prefix.length).trim().split(/ +/);
-  const cmd = args.shift().toLowerCase();
-  if (!client.commands.has(cmd)) return;
-  client.commands.get(cmd).execute(message, args);
+    // Anti-imagem proibida
+    if (message.attachments.size > 0) {
+        message.attachments.forEach(att => {
+            const allowed = ['.jpg', '.jpeg', '.png', '.gif'];
+            if (!allowed.some(ext => att.name.endsWith(ext))) {
+                message.member.ban({ reason: "Imagem proibida" }).catch(() => {});
+                const alertChannel = message.guild.channels.cache.find(ch => ch.name === "delta-alerts");
+                if (alertChannel) alertChannel.send(`<@${message.author.id}> banido por imagem proibida.`);
+            }
+        });
+    }
 });
 
 // ------------------ ANTI-RAID ------------------
 const joinMap = new Map();
-client.on('guildMemberAdd', (member) => {
-  const key = member.guild.id;
-  if (!joinMap.has(key)) joinMap.set(key, []);
-  const arr = joinMap.get(key);
-  arr.push(Date.now());
-  joinMap.set(key, arr.filter(t => t > Date.now() - 10000));
-
-  if (arr.length > 3) {
-    const alertChannel = member.guild.channels.cache.find(ch => ch.name === "delta-alerts");
-    if (alertChannel) alertChannel.send(`Alerta: possível raid detectada!`);
-  }
+client.on('guildMemberAdd', member => {
+    const key = member.guild.id;
+    if (!joinMap.has(key)) joinMap.set(key, []);
+    const arr = joinMap.get(key);
+    arr.push(Date.now());
+    joinMap.set(key, arr.filter(t => t > Date.now() - 10000));
+    if (arr.length > 3) {
+        const alertChannel = member.guild.channels.cache.find(ch => ch.name === "delta-alerts");
+        if (alertChannel) alertChannel.send(`Alerta: possível raid detectada!`);
+    }
 });
 
 // ------------------ LOGIN ------------------
-client.once(Events.ClientReady, () => {
-  console.log(`Bot online como ${client.user.tag}`);
-});
-
 client.login(process.env.TOKEN);
